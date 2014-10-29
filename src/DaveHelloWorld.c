@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <string.h>
 #include <ctype.h>
+#include <io.h>
 #include <sys/types.h>
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros
 
@@ -38,15 +39,24 @@ int main(int argc , char *argv[])
     //a message
     char *message = "ECHO Daemon v1.0 \r\n";
 
+    struct timeval timer;
+
+    timer.tv_sec = 1;
+    timer.tv_usec = 0;
+
+    /*********************************/
+    // Used exclusively for winsock
     WSADATA wsaData;   // if this doesn't work
-    //WSAData wsaData; // then try this instead
+	setvbuf(stdout, NULL, _IONBF, 0);
+	setvbuf(stderr, NULL, _IONBF, 0);
 
     if (WSAStartup(MAKEWORD(1, 1), &wsaData) != 0) {
         fprintf(stderr, "WSAStartup failed.\n");
         exit(1);
     }
+    /**********************************/
 
-    //initialise all client_socket[] to 0 so not checked
+    //Initialize all client_socket[] to 0 so not checked
     for (i = 0; i < max_clients; i++)
     {
         client_socket[i] = 0;
@@ -115,7 +125,7 @@ int main(int argc , char *argv[])
         }
 
         //wait for an activity on one of the sockets , timeout is NULL , so wait indefinitely
-        activity = select( max_sd + 1 , &readfds , NULL , NULL , NULL);
+        activity = select( max_sd + 1 , &readfds , NULL , NULL , &timer);
 
         if ((activity < 0) && (errno!=EINTR))
         {
@@ -163,8 +173,9 @@ int main(int argc , char *argv[])
 
             if (FD_ISSET( sd , &readfds))
             {
+            	valread = recv( sd , (void *)buffer, 1024, 0);
                 //Check if it was for closing , and also read the incoming message
-                if ((valread = read( sd , buffer, 1024)) == 0)
+                if (valread == 0)
                 {
                     //Somebody disconnected , get his details and print
                     getpeername(sd , (struct sockaddr*)&address , (socklen_t*)&addrlen);
@@ -176,7 +187,7 @@ int main(int argc , char *argv[])
                 }
 
                 //Echo back the message that came in
-                else
+                else if (valread > 0)
                 {
                     //set the string terminating NULL byte on the end of the data read
                     buffer[valread] = '\0';
