@@ -22,22 +22,28 @@
 
 #define TRUE   1
 #define FALSE  0
-#define PORT 8888
+#define PORT1 8888
+#define PORT2 9999
 
 int main(int argc , char *argv[])
 {
     int opt = TRUE;
-    int master_socket , addrlen , new_socket , client_socket[30] , max_clients = 30 , activity, i , valread , sd;
+    int master_socket, addrlen , new_socket , client_socket[30] , max_clients = 30 , activity, i , valread , sd;
+    int master_socket2, addrlen2 , new_socket2 , client_socket2[30],  activity2, valread2 , sd2;
     int max_sd;
+    int max_sd2;
     struct sockaddr_in address;
 
     char buffer[1025];  //data buffer of 1K
 
     //set of socket descriptors
     fd_set readfds;
+    //set of socket descriptors
+    fd_set readfds2;
 
     //a message
-    char *message = "ECHO Daemon v1.0 \r\n";
+    char *message = "ECHO Daemon v1.0 server port 8888 \r\n";
+    char *message2 = "ECHO Daemon v1.0 server port 9999 \r\n";
 
     struct timeval timer;
 
@@ -56,6 +62,8 @@ int main(int argc , char *argv[])
     }
     /**********************************/
 
+
+    ////////////////////////////////////////////////////////////////////////////////////////////
     //Initialize all client_socket[] to 0 so not checked
     for (i = 0; i < max_clients; i++)
     {
@@ -79,7 +87,7 @@ int main(int argc , char *argv[])
     //type of socket created
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons( PORT );
+    address.sin_port = htons( PORT1 );
 
     //bind the socket to localhost port 8888
     if (bind(master_socket, (struct sockaddr *)&address, sizeof(address))<0)
@@ -87,7 +95,7 @@ int main(int argc , char *argv[])
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
-    printf("Listener on port %d \n", PORT);
+    printf("Listener on port %d \n", PORT1);
 
     //try to specify maximum of 3 pending connections for the master socket
     if (listen(master_socket, 3) < 0)
@@ -95,6 +103,53 @@ int main(int argc , char *argv[])
         perror("listen");
         exit(EXIT_FAILURE);
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////
+    //Initialize all client_socket[] to 0 so not checked
+    for (i = 0; i < max_clients; i++)
+    {
+        client_socket[i] = 0;
+    }
+
+    //create a master socket
+    if( (master_socket2 = socket(AF_INET , SOCK_STREAM , 0)) == 0)
+    {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    //set master socket to allow multiple connections , this is just a good habit, it will work without this
+    if( setsockopt(master_socket2, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0 )
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    //type of socket created
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons( PORT2 );
+
+    //bind the socket to localhost port 8888
+    if (bind(master_socket2, (struct sockaddr *)&address, sizeof(address))<0)
+    {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+    printf("Listener on port %d \n", PORT2);
+
+    //try to specify maximum of 3 pending connections for the master socket
+    if (listen(master_socket2, 3) < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+
+
+
+
+
+
 
     //accept the incoming connection
     addrlen = sizeof(address);
@@ -104,10 +159,13 @@ int main(int argc , char *argv[])
     {
         //clear the socket set
         FD_ZERO(&readfds);
+        FD_ZERO(&readfds2);
 
         //add master socket to set
         FD_SET(master_socket, &readfds);
         max_sd = master_socket;
+        FD_SET(master_socket2, &readfds2);
+        max_sd2 = master_socket2;
 
         //add child sockets to set
         for ( i = 0 ; i < max_clients ; i++)
@@ -122,6 +180,20 @@ int main(int argc , char *argv[])
             //highest file descriptor number, need it for the select function
             if(sd > max_sd)
                 max_sd = sd;
+
+
+            //socket descriptor
+            sd2 = client_socket2[i];
+
+            //if valid socket descriptor then add to read list
+            if(sd2 > 0)
+                FD_SET( sd2 , &readfds2);
+
+            //highest file descriptor number, need it for the select function
+            if(sd2 > max_sd2)
+                max_sd2 = sd2;
+
+
         }
 
         //wait for an activity on one of the sockets , timeout is NULL , so wait indefinitely
