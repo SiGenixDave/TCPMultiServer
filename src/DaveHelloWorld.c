@@ -25,16 +25,22 @@
 #define PORT1 8888
 #define PORT2 9999
 
-#define MAX_CLIENTS  30
+#define MAX_CLIENTS  				100
+#define MAX_SERVER_SOCKETS			20
+
+static int mClientSocket[MAX_CLIENTS];
+static int mNumServerSockets;
+static int mServerSocket[MAX_SERVER_SOCKETS];
+static struct sockaddr_in mServerAddressInfo[MAX_SERVER_SOCKETS];
+
+static void ccInitTcpConnections (void);
+static void ccCreateServerSocket (unsigned aPort);
 
 int main(int argc , char *argv[])
 {
-    int opt = TRUE;
-    int master_socket, addrlen , new_socket , client_socket[30] , activity, i , valread , sd;
-    int master_socket2;
+
+    int addrlen, new_socket, activity, i , valread , sd;
     int max_sd;
-    struct sockaddr_in address;
-    struct sockaddr_in address2;
 
     char buffer[1025];  //data buffer of 1K
 
@@ -62,89 +68,16 @@ int main(int argc , char *argv[])
     }
     /**********************************/
 
+    ccInitTcpConnections();
 
     ////////////////////////////////////////////////////////////////////////////////////////////
-    //Initialize all client_socket[] to 0 so not checked
-    for (i = 0; i < MAX_CLIENTS; i++)
-    {
-        client_socket[i] = 0;
-    }
-
-    //create a master socket
-    if( (master_socket = socket(AF_INET , SOCK_STREAM , 0)) == 0)
-    {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-
-    //set master socket to allow multiple connections , this is just a good habit, it will work without this
-    if( setsockopt(master_socket, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0 )
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
-    //type of socket created
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons( PORT1 );
-
-    //bind the socket to localhost port 8888
-    if (bind(master_socket, (struct sockaddr *)&address, sizeof(address))<0)
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-    printf("Listener on port %d \n", PORT1);
-
-    //try to specify maximum of 3 pending connections for the master socket
-    if (listen(master_socket, 3) < 0)
-    {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////
-    //Initialize all client_socket[] to 0 so not checked
-
-    //create a master socket
-    if( (master_socket2 = socket(AF_INET , SOCK_STREAM , 0)) == 0)
-    {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-
-    //set master socket to allow multiple connections , this is just a good habit, it will work without this
-    if( setsockopt(master_socket2, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0 )
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
-    //type of socket created
-    address2.sin_family = AF_INET;
-    address2.sin_addr.s_addr = INADDR_ANY;
-    address2.sin_port = htons( PORT2 );
-
-    //bind the socket to localhost port 8888
-    if (bind(master_socket2, (struct sockaddr *)&address2, sizeof(address2))<0)
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-    printf("Listener on port %d \n", PORT2);
-
-    //try to specify maximum of 3 pending connections for the master socket
-    if (listen(master_socket2, 3) < 0)
-    {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
+    ccCreateServerSocket (8888);
+    ccCreateServerSocket (9999);
 
 
 
     //accept the incoming connection
-    addrlen = sizeof(address);
+    addrlen = sizeof(mServerAddressInfo[0]);
     puts("Waiting for connections ...");
 
     while(TRUE)
@@ -157,16 +90,16 @@ int main(int argc , char *argv[])
         FD_ZERO(&readfds);
 
         //add master socket to set
-        FD_SET(master_socket, &readfds);
-        FD_SET(master_socket2, &readfds);
-        max_sd = master_socket2;
+        FD_SET(mServerSocket[0], &readfds);
+        FD_SET(mServerSocket[1], &readfds);
+        max_sd = mServerSocket[1];
 
 
         //add child sockets to set
         for ( i = 0 ; i < MAX_CLIENTS ; i++)
         {
             //socket descriptor
-            sd = client_socket[i];
+            sd = mClientSocket[i];
 
             //if valid socket descriptor then add to read list
             if(sd > 0)
@@ -190,16 +123,16 @@ int main(int argc , char *argv[])
         }
 
         //If something happened on the master socket , then its an incoming connection
-        if (FD_ISSET(master_socket, &readfds) != 0)
+        if (FD_ISSET(mServerSocket[0], &readfds) != 0)
         {
-            if ((new_socket = accept(master_socket, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0)
+            if ((new_socket = accept(mServerSocket[0], (struct sockaddr *)&mServerAddressInfo, (socklen_t*)&addrlen))<0)
             {
                 perror("accept");
                 exit(EXIT_FAILURE);
             }
 
             //inform user of socket number - used in send and receive commands
-            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(address.sin_addr) , ntohs(address.sin_port));
+            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(mServerAddressInfo[0].sin_addr) , ntohs(mServerAddressInfo[0].sin_port));
 
             //send new connection greeting message
             if( send(new_socket, message, strlen(message), 0) != strlen(message) )
@@ -213,9 +146,9 @@ int main(int argc , char *argv[])
             for (i = 0; i < MAX_CLIENTS; i++)
             {
                 //if position is empty
-                if( client_socket[i] == 0 )
+                if( mClientSocket[i] == 0 )
                 {
-                    client_socket[i] = new_socket;
+                    mClientSocket[i] = new_socket;
                     printf("Adding to list of sockets as %d\n" , i);
 
                     break;
@@ -224,16 +157,16 @@ int main(int argc , char *argv[])
         }
 
         //If something happened on the master socket , then its an incoming connection
-        if (FD_ISSET(master_socket2, &readfds))
+        if (FD_ISSET(mServerSocket[1], &readfds))
         {
-            if ((new_socket = accept(master_socket2, (struct sockaddr *)&address2, (socklen_t*)&addrlen))<0)
+            if ((new_socket = accept(mServerSocket[1], (struct sockaddr *)&mServerAddressInfo[1], (socklen_t*)&addrlen))<0)
             {
                 perror("accept");
                 exit(EXIT_FAILURE);
             }
 
             //inform user of socket number - used in send and receive commands
-            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(address2.sin_addr) , ntohs(address.sin_port));
+            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(mServerAddressInfo[1].sin_addr) , ntohs(mServerAddressInfo[1].sin_port));
 
             //send new connection greeting message
             if( send(new_socket, message2, strlen(message2), 0) != strlen(message2) )
@@ -247,9 +180,9 @@ int main(int argc , char *argv[])
             for (i = 0; i < MAX_CLIENTS; i++)
             {
                 //if position is empty
-                if( client_socket[i] == 0 )
+                if( mClientSocket[i] == 0 )
                 {
-                    client_socket[i] = new_socket;
+                    mClientSocket[i] = new_socket;
                     printf("Adding to list of sockets as %d\n" , i);
 
                     break;
@@ -261,7 +194,7 @@ int main(int argc , char *argv[])
         //else its some IO operation on some other socket :)
         for (i = 0; i < MAX_CLIENTS; i++)
         {
-            sd = client_socket[i];
+            sd = mClientSocket[i];
 
             if (FD_ISSET( sd , &readfds))
             {
@@ -270,12 +203,12 @@ int main(int argc , char *argv[])
                 if (valread == 0)
                 {
                     //Somebody disconnected , get his details and print
-                    getpeername(sd , (struct sockaddr*)&address , (socklen_t*)&addrlen);
-                    printf("Host disconnected , ip %s , port %d \n" , inet_ntoa(address.sin_addr) , ntohs(address.sin_port));
+                    getpeername(sd , (struct sockaddr*)&mServerAddressInfo[0] , (socklen_t*)&addrlen);
+                    printf("Host disconnected , ip %s , port %d \n" , inet_ntoa(mServerAddressInfo[0].sin_addr) , ntohs(mServerAddressInfo[0].sin_port));
 
                     // Close the socket and mark as 0 in list for reuse
                     shutdown( sd, 2 );
-                    client_socket[i] = 0;
+                    mClientSocket[i] = 0;
                 }
 
                 //Echo back the message that came in
@@ -290,4 +223,67 @@ int main(int argc , char *argv[])
     }
 
     return 0;
+}
+
+
+static void ccInitTcpConnections( void )
+{
+	int i;
+
+	mNumServerSockets = 0;
+
+    //Initialize all mClientSocket[] to 0 so not checked
+    for (i = 0; i < MAX_CLIENTS; i++)
+    {
+        mClientSocket[i] = 0;
+    }
+
+}
+
+static void ccCreateServerSocket (unsigned aPort)
+{
+	int serverSocket;
+	struct sockaddr_in address;
+    int opt = TRUE;
+
+	serverSocket = socket(AF_INET , SOCK_STREAM , 0);
+
+    //create a master socket
+    if (serverSocket == 0)
+    {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    //set master socket to allow multiple connections , this is just a good habit, it will work without this
+    if( setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0 )
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    //type of socket created
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons( aPort );
+
+    //bind the socket to local host port 8888
+    if (bind(serverSocket, (struct sockaddr *)&address, sizeof(address))<0)
+    {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+    printf("Listener on port %d \n", PORT1);
+
+    //try to specify maximum of 3 pending connections for the master socket
+    if (listen(serverSocket, 3) < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+
+    mServerAddressInfo[mNumServerSockets] = address;
+    mServerSocket[mNumServerSockets] = serverSocket;
+    mNumServerSockets++;
+
 }
