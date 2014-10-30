@@ -25,21 +25,21 @@
 #define PORT1 8888
 #define PORT2 9999
 
+#define MAX_CLIENTS  30
+
 int main(int argc , char *argv[])
 {
     int opt = TRUE;
-    int master_socket, addrlen , new_socket , client_socket[30] , max_clients = 30 , activity, i , valread , sd;
-    int master_socket2, addrlen2 , new_socket2 , client_socket2[30],  activity2, valread2 , sd2;
+    int master_socket, addrlen , new_socket , client_socket[30] , activity, i , valread , sd;
+    int master_socket2;
     int max_sd;
-    int max_sd2;
     struct sockaddr_in address;
+    struct sockaddr_in address2;
 
     char buffer[1025];  //data buffer of 1K
 
     //set of socket descriptors
     fd_set readfds;
-    //set of socket descriptors
-    fd_set readfds2;
 
     //a message
     char *message = "ECHO Daemon v1.0 server port 8888 \r\n";
@@ -47,7 +47,7 @@ int main(int argc , char *argv[])
 
     struct timeval timer;
 
-    timer.tv_sec = 1;
+    timer.tv_sec = 0;
     timer.tv_usec = 0;
 
     /*********************************/
@@ -65,7 +65,7 @@ int main(int argc , char *argv[])
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     //Initialize all client_socket[] to 0 so not checked
-    for (i = 0; i < max_clients; i++)
+    for (i = 0; i < MAX_CLIENTS; i++)
     {
         client_socket[i] = 0;
     }
@@ -106,10 +106,6 @@ int main(int argc , char *argv[])
 
     ////////////////////////////////////////////////////////////////////////////////////////////
     //Initialize all client_socket[] to 0 so not checked
-    for (i = 0; i < max_clients; i++)
-    {
-        client_socket[i] = 0;
-    }
 
     //create a master socket
     if( (master_socket2 = socket(AF_INET , SOCK_STREAM , 0)) == 0)
@@ -126,12 +122,12 @@ int main(int argc , char *argv[])
     }
 
     //type of socket created
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons( PORT2 );
+    address2.sin_family = AF_INET;
+    address2.sin_addr.s_addr = INADDR_ANY;
+    address2.sin_port = htons( PORT2 );
 
     //bind the socket to localhost port 8888
-    if (bind(master_socket2, (struct sockaddr *)&address, sizeof(address))<0)
+    if (bind(master_socket2, (struct sockaddr *)&address2, sizeof(address2))<0)
     {
         perror("bind failed");
         exit(EXIT_FAILURE);
@@ -147,28 +143,27 @@ int main(int argc , char *argv[])
 
 
 
-
-
-
-
     //accept the incoming connection
     addrlen = sizeof(address);
     puts("Waiting for connections ...");
 
     while(TRUE)
     {
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+    	// All of this is required each time in the while loop because the select function modifies the
+    	// flags in the file
+    	// descriptors
         //clear the socket set
         FD_ZERO(&readfds);
-        FD_ZERO(&readfds2);
 
         //add master socket to set
         FD_SET(master_socket, &readfds);
-        max_sd = master_socket;
-        FD_SET(master_socket2, &readfds2);
-        max_sd2 = master_socket2;
+        FD_SET(master_socket2, &readfds);
+        max_sd = master_socket2;
+
 
         //add child sockets to set
-        for ( i = 0 ; i < max_clients ; i++)
+        for ( i = 0 ; i < MAX_CLIENTS ; i++)
         {
             //socket descriptor
             sd = client_socket[i];
@@ -181,31 +176,21 @@ int main(int argc , char *argv[])
             if(sd > max_sd)
                 max_sd = sd;
 
-
-            //socket descriptor
-            sd2 = client_socket2[i];
-
-            //if valid socket descriptor then add to read list
-            if(sd2 > 0)
-                FD_SET( sd2 , &readfds2);
-
-            //highest file descriptor number, need it for the select function
-            if(sd2 > max_sd2)
-                max_sd2 = sd2;
-
-
         }
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+
 
         //wait for an activity on one of the sockets , timeout is NULL , so wait indefinitely
-        activity = select( max_sd + 1 , &readfds , NULL , NULL , &timer);
+        activity = select( max_sd + 1 , &readfds , NULL , NULL , NULL);
+        //activity = select( max_sd2 + 1 , &readfds , NULL , NULL , &timer);
 
-        if ((activity < 0) && (errno!=EINTR))
+        if ( (activity < 0) && (errno!=EINTR) )
         {
             printf("select error");
         }
 
         //If something happened on the master socket , then its an incoming connection
-        if (FD_ISSET(master_socket, &readfds))
+        if (FD_ISSET(master_socket, &readfds) != 0)
         {
             if ((new_socket = accept(master_socket, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0)
             {
@@ -225,7 +210,7 @@ int main(int argc , char *argv[])
             puts("Welcome message sent successfully");
 
             //add new socket to array of sockets
-            for (i = 0; i < max_clients; i++)
+            for (i = 0; i < MAX_CLIENTS; i++)
             {
                 //if position is empty
                 if( client_socket[i] == 0 )
@@ -238,8 +223,43 @@ int main(int argc , char *argv[])
             }
         }
 
+        //If something happened on the master socket , then its an incoming connection
+        if (FD_ISSET(master_socket2, &readfds))
+        {
+            if ((new_socket = accept(master_socket2, (struct sockaddr *)&address2, (socklen_t*)&addrlen))<0)
+            {
+                perror("accept");
+                exit(EXIT_FAILURE);
+            }
+
+            //inform user of socket number - used in send and receive commands
+            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(address2.sin_addr) , ntohs(address.sin_port));
+
+            //send new connection greeting message
+            if( send(new_socket, message2, strlen(message2), 0) != strlen(message2) )
+            {
+                perror("send");
+            }
+
+            puts("Welcome message sent successfully");
+
+            //add new socket to array of sockets
+            for (i = 0; i < MAX_CLIENTS; i++)
+            {
+                //if position is empty
+                if( client_socket[i] == 0 )
+                {
+                    client_socket[i] = new_socket;
+                    printf("Adding to list of sockets as %d\n" , i);
+
+                    break;
+                }
+            }
+        }
+
+
         //else its some IO operation on some other socket :)
-        for (i = 0; i < max_clients; i++)
+        for (i = 0; i < MAX_CLIENTS; i++)
         {
             sd = client_socket[i];
 
@@ -253,8 +273,8 @@ int main(int argc , char *argv[])
                     getpeername(sd , (struct sockaddr*)&address , (socklen_t*)&addrlen);
                     printf("Host disconnected , ip %s , port %d \n" , inet_ntoa(address.sin_addr) , ntohs(address.sin_port));
 
-                    //Close the socket and mark as 0 in list for reuse
-                    close( sd );
+                    // Close the socket and mark as 0 in list for reuse
+                    shutdown( sd, 2 );
                     client_socket[i] = 0;
                 }
 
