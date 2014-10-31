@@ -32,24 +32,24 @@ static int mClientSocket[MAX_CLIENTS];
 static int mNumServerSockets;
 static int mServerSocket[MAX_SERVER_SOCKETS];
 static struct sockaddr_in mServerAddressInfo[MAX_SERVER_SOCKETS];
+static fd_set mReadfds; //set of socket descriptors
+
 
 static void ccInitTcpConnections (void);
+static int ccPopulateSocketDescriptorList (void);
 static void ccCreateServerSocket (unsigned aPort);
+static void ccScanForNewConnections (void);
 
 int main(int argc , char *argv[])
 {
 
-    int addrlen, new_socket, activity, i , valread , sd;
-    int max_sd;
+    int activity, i, valread, maxSd, sd;
+    int addrlen;
+    struct sockaddr_in addressInfo;
 
     char buffer[1025];  //data buffer of 1K
 
-    //set of socket descriptors
-    fd_set readfds;
 
-    //a message
-    char *message = "ECHO Daemon v1.0 server port 8888 \r\n";
-    char *message2 = "ECHO Daemon v1.0 server port 9999 \r\n";
 
     struct timeval timer;
 
@@ -77,134 +77,42 @@ int main(int argc , char *argv[])
 
 
     //accept the incoming connection
-    addrlen = sizeof(mServerAddressInfo[0]);
     puts("Waiting for connections ...");
 
     while(TRUE)
     {
-        /////////////////////////////////////////////////////////////////////////////////////////////////
-    	// All of this is required each time in the while loop because the select function modifies the
-    	// flags in the file
-    	// descriptors
-        //clear the socket set
-        FD_ZERO(&readfds);
 
-        //add master socket to set
-        FD_SET(mServerSocket[0], &readfds);
-        FD_SET(mServerSocket[1], &readfds);
-        max_sd = mServerSocket[1];
-
-
-        //add child sockets to set
-        for ( i = 0 ; i < MAX_CLIENTS ; i++)
-        {
-            //socket descriptor
-            sd = mClientSocket[i];
-
-            //if valid socket descriptor then add to read list
-            if(sd > 0)
-                FD_SET( sd , &readfds);
-
-            //highest file descriptor number, need it for the select function
-            if(sd > max_sd)
-                max_sd = sd;
-
-        }
-        /////////////////////////////////////////////////////////////////////////////////////////////////
+    	maxSd = ccPopulateSocketDescriptorList ();
 
 
         //wait for an activity on one of the sockets , timeout is NULL , so wait indefinitely
-        activity = select( max_sd + 1 , &readfds , NULL , NULL , NULL);
-        //activity = select( max_sd2 + 1 , &readfds , NULL , NULL , &timer);
+        activity = select( maxSd + 1 , &mReadfds , NULL , NULL , NULL);
+        //activity = select( max_sd2 + 1 , &mReadfds , NULL , NULL , &timer);
 
         if ( (activity < 0) && (errno!=EINTR) )
         {
             printf("select error");
         }
 
-        //If something happened on the master socket , then its an incoming connection
-        if (FD_ISSET(mServerSocket[0], &readfds) != 0)
-        {
-            if ((new_socket = accept(mServerSocket[0], (struct sockaddr *)&mServerAddressInfo, (socklen_t*)&addrlen))<0)
-            {
-                perror("accept");
-                exit(EXIT_FAILURE);
-            }
 
-            //inform user of socket number - used in send and receive commands
-            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(mServerAddressInfo[0].sin_addr) , ntohs(mServerAddressInfo[0].sin_port));
+        ccScanForNewConnections();
 
-            //send new connection greeting message
-            if( send(new_socket, message, strlen(message), 0) != strlen(message) )
-            {
-                perror("send");
-            }
-
-            puts("Welcome message sent successfully");
-
-            //add new socket to array of sockets
-            for (i = 0; i < MAX_CLIENTS; i++)
-            {
-                //if position is empty
-                if( mClientSocket[i] == 0 )
-                {
-                    mClientSocket[i] = new_socket;
-                    printf("Adding to list of sockets as %d\n" , i);
-
-                    break;
-                }
-            }
-        }
-
-        //If something happened on the master socket , then its an incoming connection
-        if (FD_ISSET(mServerSocket[1], &readfds))
-        {
-            if ((new_socket = accept(mServerSocket[1], (struct sockaddr *)&mServerAddressInfo[1], (socklen_t*)&addrlen))<0)
-            {
-                perror("accept");
-                exit(EXIT_FAILURE);
-            }
-
-            //inform user of socket number - used in send and receive commands
-            printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(mServerAddressInfo[1].sin_addr) , ntohs(mServerAddressInfo[1].sin_port));
-
-            //send new connection greeting message
-            if( send(new_socket, message2, strlen(message2), 0) != strlen(message2) )
-            {
-                perror("send");
-            }
-
-            puts("Welcome message sent successfully");
-
-            //add new socket to array of sockets
-            for (i = 0; i < MAX_CLIENTS; i++)
-            {
-                //if position is empty
-                if( mClientSocket[i] == 0 )
-                {
-                    mClientSocket[i] = new_socket;
-                    printf("Adding to list of sockets as %d\n" , i);
-
-                    break;
-                }
-            }
-        }
-
-
-        //else its some IO operation on some other socket :)
+        // its some IO operation on some other socket :)
         for (i = 0; i < MAX_CLIENTS; i++)
         {
             sd = mClientSocket[i];
 
-            if (FD_ISSET( sd , &readfds))
+            if (FD_ISSET( sd , &mReadfds))
             {
             	valread = recv( sd , (void *)buffer, 1024, 0);
                 //Check if it was for closing , and also read the incoming message
                 if (valread == 0)
                 {
+                	// TODO
+                	addrlen = sizeof(addressInfo);
                     //Somebody disconnected , get his details and print
-                    getpeername(sd , (struct sockaddr*)&mServerAddressInfo[0] , (socklen_t*)&addrlen);
-                    printf("Host disconnected , ip %s , port %d \n" , inet_ntoa(mServerAddressInfo[0].sin_addr) , ntohs(mServerAddressInfo[0].sin_port));
+                    getpeername(sd , (struct sockaddr *)&addressInfo , (socklen_t *)&addrlen);
+                    printf("Host disconnected , ip %s , port %d \n" , inet_ntoa(addressInfo.sin_addr) , ntohs(addressInfo.sin_port));
 
                     // Close the socket and mark as 0 in list for reuse
                     shutdown( sd, 2 );
@@ -240,6 +148,48 @@ static void ccInitTcpConnections( void )
 
 }
 
+
+static int ccPopulateSocketDescriptorList (void)
+{
+	int maxSd;
+	int sd;
+	int i;
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+	// All of this is required each time in the while loop because the select function modifies the
+	// flags in the file
+	// descriptors
+    //clear the socket set
+    FD_ZERO(&mReadfds);
+
+    //add master socket to set
+    FD_SET(mServerSocket[0], &mReadfds);
+    FD_SET(mServerSocket[1], &mReadfds);
+    maxSd = mServerSocket[1];
+
+
+    //add child sockets to set
+    for ( i = 0 ; i < MAX_CLIENTS ; i++)
+    {
+        //socket descriptor
+        sd = mClientSocket[i];
+
+        //if valid socket descriptor then add to read list
+        if(sd > 0)
+        {
+            FD_SET( sd , &mReadfds);
+        }
+
+        //highest file descriptor number, need it for the select function
+        if(sd > maxSd)
+        	maxSd = sd;
+
+    }
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+
+    return maxSd;
+}
+
 static void ccCreateServerSocket (unsigned aPort)
 {
 	int serverSocket;
@@ -273,7 +223,7 @@ static void ccCreateServerSocket (unsigned aPort)
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
-    printf("Listener on port %d \n", PORT1);
+    printf("Listener on port %d \n", aPort);
 
     //try to specify maximum of 3 pending connections for the master socket
     if (listen(serverSocket, 3) < 0)
@@ -285,5 +235,63 @@ static void ccCreateServerSocket (unsigned aPort)
     mServerAddressInfo[mNumServerSockets] = address;
     mServerSocket[mNumServerSockets] = serverSocket;
     mNumServerSockets++;
+
+}
+
+static void ccScanForNewConnections (void)
+{
+
+    //a message
+    char *message[] = {
+    				  	  "ECHO Daemon v1.0 server port 8888 \r\n",
+    				  	  "ECHO Daemon v1.0 server port 9999 \r\n"
+					  };
+
+    int new_socket;
+
+    int socketId = 0;
+    int addrlen;
+    int i;
+
+    while (mServerSocket[socketId] != 0)
+    {
+        addrlen = sizeof(mServerAddressInfo[socketId]);
+
+		//If something happened on the master socket , then its an incoming connection
+		if (FD_ISSET(mServerSocket[socketId], &mReadfds) != 0)
+		{
+			if ((new_socket = accept(mServerSocket[socketId], (struct sockaddr *)&mServerAddressInfo[socketId], (socklen_t*)&addrlen))<0)
+			{
+				perror("accept");
+				exit(EXIT_FAILURE);
+			}
+
+			//inform user of socket number - used in send and receive commands
+			printf("New connection , socket fd is %d , ip is : %s , port : %d \n" , new_socket , inet_ntoa(mServerAddressInfo[socketId].sin_addr) , ntohs(mServerAddressInfo[socketId].sin_port));
+
+			//send new connection greeting message
+			if( send(new_socket, message[socketId], strlen(message[socketId]), 0) != strlen(message[socketId]) )
+			{
+				perror("send");
+			}
+
+			puts("Welcome message sent successfully");
+
+			//add new socket to array of sockets
+			for (i = 0; i < MAX_CLIENTS; i++)
+			{
+				//if position is empty
+				if( mClientSocket[i] == 0 )
+				{
+					mClientSocket[i] = new_socket;
+					printf("Adding to list of sockets as %d\n" , i);
+
+					break;
+				}
+			}
+		}
+		socketId++;
+
+    }
 
 }
