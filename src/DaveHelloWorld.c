@@ -1,3 +1,8 @@
+// Override default setting of 64 in winsock2.h; max # of total TCP sockets
+// (client and server) that can be handled by select ()
+#define FD_SETSIZE	512
+
+
 #ifdef WIN32
 #include <windows.h>
 #include <winsock2.h>
@@ -53,7 +58,7 @@ static struct timeval *mTimerPtr;
 static void ccInitTcpConnections (void);
 static void ccSetBlockingTime (long int aSeconds, long int aMicroSeconds);
 static void ccBlockUntilActivity (void);
-static void ccCheckSocketData (void);
+static void ccServiceIncomingSocketData (void);
 static int ccPopulateSocketDescriptorList (void);
 static void ccCreateServerSocket (unsigned aPort, ccServerCallbackFunc aCallBackFunc);
 static void ccScanForNewConnections (void);
@@ -87,7 +92,8 @@ void ccServerCallback9999 (char *aBuffer, int aNumBytes, int aClientSocketId)
 	strcat(str, "\n");
 
 	send(aClientSocketId , str , strlen(str) , 0 );
-	printf("Server 9999: SocketId = %d, # Bytes in Msg = %d, Msg = %s", aClientSocketId, aNumBytes, aBuffer);}
+	printf("Server 9999: SocketId = %d, # Bytes in Msg = %d, Msg = %s", aClientSocketId, aNumBytes, aBuffer);
+}
 
 int main(int argc , char *argv[])
 {
@@ -135,7 +141,7 @@ int main(int argc , char *argv[])
 
         ccScanForNewConnections ();
 
-        ccCheckSocketData ();
+        ccServiceIncomingSocketData ();
 
     }
 
@@ -149,9 +155,7 @@ static void ccInitTcpConnections( void )
 
     //TODO Initialize all mClientSocket[] to 0 so not checked
 
-    mTimer.tv_sec = 0;
-    mTimer.tv_usec = 0;
-    mTimerPtr = &mTimer;
+	ccSetBlockingTime (0, 0);
 
 }
 
@@ -176,19 +180,24 @@ static int ccPopulateSocketDescriptorList (void)
 	int i;
 	int socketCnt = 0;
 
-    /////////////////////////////////////////////////////////////////////////////////////////////////
 	// All of this is required each time in the while loop because the select function modifies the
-	// flags in the file
-	// descriptors
-    //clear the socket set
+	// flags in the file descriptors
+    // clear the socket set
     FD_ZERO(&mReadfds);
 
-    //add master socket to set
-    FD_SET(mServers[0].socketId, &mReadfds);
-    FD_SET(mServers[1].socketId, &mReadfds);
-    maxSd = mServers[1].socketId;
+    maxSd = 0;
+    while (mServers[socketCnt].socketId != 0)
+    {
+    	//add master socket to set
+    	FD_SET(mServers[socketCnt].socketId, &mReadfds);
+    	if (mServers[socketCnt].socketId > maxSd)
+    	{
+    		maxSd = mServers[socketCnt].socketId;
+    	}
+    	socketCnt++;
+    }
 
-
+    socketCnt = 0;
     while (mServers[socketCnt].socketId != 0)
     {
     	//add child sockets to set
@@ -202,21 +211,26 @@ static int ccPopulateSocketDescriptorList (void)
 			{
 				FD_SET( sd , &mReadfds);
 			}
+			else
+			{
+				break;
+			}
 
 			//highest file descriptor number, need it for the select function
 			if(sd > maxSd)
+			{
 				maxSd = sd;
+			}
 		}
 
 		socketCnt++;
 	}
-    /////////////////////////////////////////////////////////////////////////////////////////////////
 
     return maxSd;
 }
 
 
-static void ccCheckSocketData (void)
+static void ccServiceIncomingSocketData (void)
 {
 	int i, sd, valread;
     int addrlen;
@@ -231,6 +245,11 @@ static void ccCheckSocketData (void)
 		for (i = 0; i < MAX_CLIENTS_PER_SERVER; i++)
 		{
 			sd = mServers[socketCnt].clientSockets[i];
+
+			if (sd == 0)
+			{
+				break;
+			}
 
 			if (FD_ISSET( sd , &mReadfds))
 			{
@@ -333,7 +352,8 @@ static void ccScanForNewConnections (void)
 		//If something happened on the master socketId , then its an incoming connection
 		if (FD_ISSET(mServers[socketCnt].socketId, &mReadfds) != 0)
 		{
-			if ((new_socket = accept(mServers[socketCnt].socketId, (struct sockaddr *)&mServers[socketCnt].addressInfo, (socklen_t*)&addrlen))<0)
+			new_socket = accept(mServers[socketCnt].socketId, (struct sockaddr *)&mServers[socketCnt].addressInfo, (socklen_t*)&addrlen);
+			if (new_socket < 0)
 			{
 				perror("accept");
 				exit(EXIT_FAILURE);
@@ -351,7 +371,7 @@ static void ccScanForNewConnections (void)
 				perror("send");
 			}
 
-			puts("Welcome message sent successfully");
+			printf("Welcome message sent successfully\n");
 
 			//add new socketId to array of sockets
 			for (i = 0; i < MAX_CLIENTS_PER_SERVER; i++)
