@@ -26,10 +26,6 @@
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros
 
 ///////////////////////////////////////////////////////////////////////////////////////
-#define TRUE   1
-#define FALSE  0
-#define PORT1 8888
-#define PORT2 9999
 
 #define MAX_CLIENTS_PER_SERVER		10
 #define MAX_SERVER_SOCKETS			20
@@ -63,6 +59,22 @@ static int ccPopulateSocketDescriptorList (void);
 static void ccCreateServerSocket (unsigned aPort, ccServerCallbackFunc aCallBackFunc);
 static void ccScanForNewConnections (void);
 
+
+void ccServerCallback7777 (char *aBuffer, int aNumBytes, int aClientSocketId)
+{
+	char str[200];
+
+	sprintf(str, "Port 7777 --- SocketID = %d   ---- Msg = ", aClientSocketId);
+
+	//set the string terminating NULL byte on the end of the data read
+	aBuffer[aNumBytes] = '\0';
+	strcat(str, aBuffer);
+	strcat(str, "\n");
+
+	send(aClientSocketId , str , strlen(str) , 0 );
+	printf("Server 7777: SocketId = %d, # Bytes in Msg = %d, Msg = %s", aClientSocketId, aNumBytes, aBuffer);
+
+}
 
 void ccServerCallback8888 (char *aBuffer, int aNumBytes, int aClientSocketId)
 {
@@ -115,6 +127,7 @@ int main(int argc , char *argv[])
     ccInitTcpConnections();
 
     ////////////////////////////////////////////////////////////////////////////////////////////
+    ccCreateServerSocket (7777, ccServerCallback7777);
     ccCreateServerSocket (8888, ccServerCallback8888);
     ccCreateServerSocket (9999, ccServerCallback9999);
 
@@ -352,7 +365,7 @@ static void ccScanForNewConnections (void)
 		//If something happened on the master socketId , then its an incoming connection
 		if (FD_ISSET(mServers[socketCnt].socketId, &mReadfds) != 0)
 		{
-			new_socket = accept(mServers[socketCnt].socketId, (struct sockaddr *)&mServers[socketCnt].addressInfo, (socklen_t*)&addrlen);
+			new_socket = accept(mServers[socketCnt].socketId, (struct sockaddr *)&mServers[socketCnt].addressInfo, (socklen_t *)&addrlen);
 			if (new_socket < 0)
 			{
 				perror("accept");
