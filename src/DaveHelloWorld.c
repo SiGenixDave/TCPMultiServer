@@ -21,7 +21,11 @@
 #include <errno.h>
 #include <string.h>
 #include <ctype.h>
+
+#ifdef WIN32
 #include <io.h>
+#endif
+
 #include <sys/types.h>
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros
 
@@ -112,6 +116,7 @@ int main(int argc , char *argv[])
 
     int activity, maxSd;
 
+#ifdef WIN32
     /*********************************/
     // Used exclusively for winsock
     WSADATA wsaData;   // if this doesn't work
@@ -123,6 +128,7 @@ int main(int argc , char *argv[])
         exit(1);
     }
     /**********************************/
+#endif
 
     ccInitTcpConnections();
 
