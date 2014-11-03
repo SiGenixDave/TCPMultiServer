@@ -27,8 +27,8 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-#define MAX_CLIENTS_PER_SERVER		10
-#define MAX_SERVER_SOCKETS			20
+#define MAX_CLIENTS_PER_SERVER				50
+#define MAX_INITIAL_SERVER_SOCKETS			20
 
 ///////////////////////////////////////////////////////////////////////////////////////
 typedef void ccServerCallbackFunc(char *aBuffer, int aNumBytes, int aClientSocketId);
@@ -44,7 +44,7 @@ typedef struct
 
 ///////////////////////////////////////////////////////////////////////////////////////
 static int mNumServerSockets;
-static ServerSocketInfo mServers[MAX_SERVER_SOCKETS];
+static ServerSocketInfo *mServers;
 static fd_set mReadfds; //set of socket descriptors
 static struct timeval mTimer;
 static struct timeval *mTimerPtr;
@@ -131,8 +131,9 @@ int main(int argc , char *argv[])
     ccCreateServerSocket (8888, ccServerCallback8888);
     ccCreateServerSocket (9999, ccServerCallback9999);
 
+#ifdef _DEBUG
     ccBlockUntilActivity();
-
+#endif
 
     //accept the incoming connection
     puts("Waiting for connections ...");
@@ -166,7 +167,7 @@ static void ccInitTcpConnections( void )
 {
 	mNumServerSockets = 0;
 
-    //TODO Initialize all mClientSocket[] to 0 so not checked
+	mServers = calloc (MAX_INITIAL_SERVER_SOCKETS, sizeof(ServerSocketInfo));
 
 	ccSetBlockingTime (0, 0);
 
@@ -175,6 +176,7 @@ static void ccInitTcpConnections( void )
 
 static void ccSetBlockingTime (long int aSeconds, long int aMicroSeconds)
 {
+
 	mTimer.tv_sec = aSeconds;
 	mTimer.tv_usec = aMicroSeconds;
 
@@ -348,8 +350,9 @@ static void ccScanForNewConnections (void)
 
     //a message
     char *message[] = {
-    				  	  "ECHO Daemon v1.0 server port 8888 \r\n",
-    				  	  "ECHO Daemon v1.0 server port 9999 \r\n"
+    					"ECHO Daemon v1.0 server port 7777 \r\n",
+    					"ECHO Daemon v1.0 server port 8888 \r\n",
+    					"ECHO Daemon v1.0 server port 9999 \r\n"
 					  };
 
     int new_socket;
